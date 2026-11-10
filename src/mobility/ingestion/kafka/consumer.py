@@ -7,6 +7,7 @@ from typing import Any
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message
 from pydantic import ValidationError
 
+from mobility.ingestion.kafka.dead_letter import DeadLetterPublisher
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent
 
 EventHandler = Callable[[VehicleEvent], None]
@@ -21,6 +22,7 @@ class VehicleEventConsumer:
         topic: str = "mobility.test",
         group_id: str = "mobility-consumer",
         event_handler: EventHandler | None = None,
+        dead_letter_publisher: DeadLetterPublisher | None = None,
     ) -> None:
         """Initialize the Kafka consumer."""
         if not bootstrap_servers.strip():
@@ -34,6 +36,7 @@ class VehicleEventConsumer:
 
         self._topic = topic
         self._event_handler = event_handler
+        self._dead_letter_publisher = dead_letter_publisher
 
         self._consumer = Consumer(
             {
@@ -106,7 +109,23 @@ class VehicleEventConsumer:
 
             raise KafkaException(error)
 
-        event = self.deserialize_message(message)
+        try:
+            event = self.deserialize_message(message)
+        except (ValueError, ValidationError) as error:
+            if self._dead_letter_publisher is None:
+                raise
+
+            self._dead_letter_publisher.publish(
+                original_topic=message.topic(),
+                original_partition=message.partition(),
+                original_offset=message.offset(),
+                original_payload=message.value(),
+                error_type=type(error).__name__,
+                error_message=str(error),
+            )
+
+            self._consumer.commit(message=message, asynchronous=False)
+            return None
 
         if self._event_handler is not None:
             self._event_handler(event)
