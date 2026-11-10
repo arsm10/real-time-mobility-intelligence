@@ -12,6 +12,7 @@ requires-python = ">=3.12,<3.13"
 license = "MIT"
 dependencies = [
     "pydantic>=2.11,<3",
+    "confluent-kafka>=2.10,<3",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +28,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra"
+addopts = "-ra -m 'not integration'"
+markers = [
+    "integration: tests requiring external services such as Kafka",
+]
 
 [tool.ruff]
 line-length = 100
