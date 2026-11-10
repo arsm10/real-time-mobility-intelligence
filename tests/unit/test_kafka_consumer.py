@@ -10,6 +10,7 @@ from confluent_kafka import KafkaError, KafkaException
 from pydantic import ValidationError
 
 from mobility.ingestion.kafka.consumer import VehicleEventConsumer
+from mobility.ingestion.kafka.dead_letter import DeadLetterPublisher
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent, VehicleStatus
 
 
@@ -49,6 +50,9 @@ def create_message(payload: bytes | None = None) -> MagicMock:
     message = MagicMock()
     message.value.return_value = payload
     message.error.return_value = None
+    message.topic.return_value = "mobility.test"
+    message.partition.return_value = 1
+    message.offset.return_value = 42
     return message
 
 
@@ -375,3 +379,71 @@ def test_close_is_idempotent(
     consumer.close()
 
     consumer._consumer.close.assert_called_once()
+
+
+def test_process_next_sends_invalid_json_to_dead_letter_queue(
+    consumer: VehicleEventConsumer,
+) -> None:
+    """Send invalid JSON to the DLQ and commit its offset."""
+    dead_letter_publisher = MagicMock(spec=DeadLetterPublisher)
+    consumer._dead_letter_publisher = dead_letter_publisher
+    consumer._subscribed = True
+
+    message = create_message(b"invalid json")
+    consumer._consumer.poll.return_value = message
+
+    result = consumer.process_next()
+
+    assert result is None
+    dead_letter_publisher.publish.assert_called_once_with(
+        original_topic="mobility.test",
+        original_partition=1,
+        original_offset=42,
+        original_payload=b"invalid json",
+        error_type="ValueError",
+        error_message="Kafka message contains invalid JSON",
+    )
+    consumer._consumer.commit.assert_called_once_with(
+        message=message,
+        asynchronous=False,
+    )
+
+
+def test_process_next_sends_invalid_schema_to_dead_letter_queue(
+    consumer: VehicleEventConsumer,
+) -> None:
+    """Send schema-invalid JSON to the DLQ and commit its offset."""
+    dead_letter_publisher = MagicMock(spec=DeadLetterPublisher)
+    consumer._dead_letter_publisher = dead_letter_publisher
+    consumer._subscribed = True
+
+    message = create_message(b'{"invalid": "schema"}')
+    consumer._consumer.poll.return_value = message
+
+    result = consumer.process_next()
+
+    assert result is None
+    dead_letter_publisher.publish.assert_called_once()
+    assert dead_letter_publisher.publish.call_args.kwargs["error_type"] == "ValidationError"
+    consumer._consumer.commit.assert_called_once_with(
+        message=message,
+        asynchronous=False,
+    )
+
+
+def test_process_next_does_not_commit_when_dead_letter_publish_fails(
+    consumer: VehicleEventConsumer,
+) -> None:
+    """Do not commit the offset if DLQ publishing fails."""
+    dead_letter_publisher = MagicMock(spec=DeadLetterPublisher)
+    dead_letter_publisher.publish.side_effect = RuntimeError("DLQ unavailable")
+    consumer._dead_letter_publisher = dead_letter_publisher
+    consumer._subscribed = True
+
+    message = create_message(b"invalid json")
+    consumer._consumer.poll.return_value = message
+
+    with pytest.raises(RuntimeError, match="DLQ unavailable"):
+        consumer.process_next()
+
+    consumer._consumer.commit.assert_not_called()
