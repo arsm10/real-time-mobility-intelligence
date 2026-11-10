@@ -10,7 +10,9 @@ description = "A real-time public transport data engineering and analytics platf
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
-dependencies = []
+dependencies = [
+    "pydantic>=2.11,<3",
+]
 
 [project.optional-dependencies]
 dev = [
