@@ -36,9 +36,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -m 'not integration'"
+addopts = "-ra -m 'not integration and not e2e'"
 markers = [
     "integration: tests requiring external services such as Kafka, PostgreSQL/PostGIS, or ClickHouse",
+    "e2e: end-to-end tests requiring the running application stack",
 ]
 
 [tool.ruff]
