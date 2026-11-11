@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent
-from mobility.storage.database import engine
+from mobility.storage.database import get_database_engine
 from mobility.storage.models import VehicleEventRecord
 
 
@@ -38,7 +38,7 @@ def save_event(event: VehicleEvent) -> bool:
         .returning(VehicleEventRecord.event_id)
     )
 
-    with Session(engine) as session:
+    with Session(get_database_engine()) as session:
         inserted_event_id = session.execute(statement).scalar_one_or_none()
         session.commit()
 

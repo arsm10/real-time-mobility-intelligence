@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
@@ -5,8 +7,9 @@ from mobility.storage.config import DatabaseConfig
 from mobility.storage.models import Base
 
 
-def create_database_engine() -> Engine:
-    """Create a SQLAlchemy engine for PostgreSQL."""
+@lru_cache(maxsize=1)
+def get_database_engine() -> Engine:
+    """Create and cache a SQLAlchemy engine for PostgreSQL."""
     database_url = DatabaseConfig.get_database_url()
 
     return create_engine(
@@ -16,9 +19,6 @@ def create_database_engine() -> Engine:
     )
 
 
-engine = create_database_engine()
-
-
 def initialize_database() -> None:
     """Create all registered database tables."""
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=get_database_engine())

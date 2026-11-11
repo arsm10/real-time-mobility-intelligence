@@ -30,8 +30,12 @@ def create_test_event() -> VehicleEvent:
     )
 
 
+@patch("mobility.storage.repository.get_database_engine")
 @patch("mobility.storage.repository.Session")
-def test_save_event_returns_true_when_inserted(mock_session_class: MagicMock) -> None:
+def test_save_event_returns_true_when_inserted(
+    mock_session_class: MagicMock,
+    mock_get_database_engine: MagicMock,
+) -> None:
     """Return True when PostgreSQL inserts a new event."""
     event = create_test_event()
 
@@ -46,8 +50,12 @@ def test_save_event_returns_true_when_inserted(mock_session_class: MagicMock) ->
     mock_session.commit.assert_called_once()
 
 
+@patch("mobility.storage.repository.get_database_engine")
 @patch("mobility.storage.repository.Session")
-def test_save_event_returns_false_for_duplicate(mock_session_class: MagicMock) -> None:
+def test_save_event_returns_false_for_duplicate(
+    mock_session_class: MagicMock,
+    mock_get_database_engine: MagicMock,
+) -> None:
     """Return False when the event already exists."""
     event = create_test_event()
 
@@ -62,8 +70,12 @@ def test_save_event_returns_false_for_duplicate(mock_session_class: MagicMock) -
     mock_session.commit.assert_called_once()
 
 
+@patch("mobility.storage.repository.get_database_engine")
 @patch("mobility.storage.repository.Session")
-def test_save_event_builds_postgis_location(mock_session_class: MagicMock) -> None:
+def test_save_event_builds_postgis_location(
+    mock_session_class: MagicMock,
+    mock_get_database_engine: MagicMock,
+) -> None:
     """Include a correctly ordered PostGIS point in the insert statement."""
     event = create_test_event()
 

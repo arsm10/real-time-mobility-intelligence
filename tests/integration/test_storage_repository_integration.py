@@ -11,7 +11,7 @@ from mobility.ingestion.simulator.config import VehicleConfig
 from mobility.ingestion.simulator.event_factory import create_vehicle_event
 from mobility.ingestion.simulator.movement import create_vehicle_state
 from mobility.ingestion.simulator.route import GeoPoint, Route
-from mobility.storage.database import engine
+from mobility.storage.database import get_database_engine
 from mobility.storage.models import VehicleEventRecord
 from mobility.storage.repository import save_event
 
@@ -48,7 +48,7 @@ def test_save_event_persists_event_and_prevents_duplicates() -> None:
         assert save_event(event) is True
         assert save_event(event) is False
 
-        with Session(engine) as session:
+        with Session(get_database_engine()) as session:
             record = session.execute(
                 select(
                     VehicleEventRecord.vehicle_id,
@@ -66,7 +66,7 @@ def test_save_event_persists_event_and_prevents_duplicates() -> None:
         assert record[4] == "POINT(12.3731 51.3397)"
 
     finally:
-        with Session(engine) as session:
+        with Session(get_database_engine()) as session:
             session.execute(
                 delete(VehicleEventRecord).where(VehicleEventRecord.event_id == event.event_id)
             )
