@@ -66,6 +66,8 @@ def test_worker_uses_environment_configuration(
         group_id="analytics-worker",
         event_handler=mock_consumer.call_args.kwargs["event_handler"],
         dead_letter_publisher=mock_dlq.return_value,
+        on_event_consumed=mock_consumer.call_args.kwargs["on_event_consumed"],
+        on_dead_lettered=mock_consumer.call_args.kwargs["on_dead_lettered"],
     )
 
 
@@ -74,10 +76,17 @@ def test_handle_event_persists_to_clickhouse(
     mock_save_event: MagicMock,
     valid_event: VehicleEvent,
 ) -> None:
-    """Persist the validated event through the analytics repository."""
-    KafkaClickHouseWorker._handle_event(valid_event)
+    """Persist the validated event and increment the stored metric."""
+    worker = KafkaClickHouseWorker()
+
+    worker._handle_event(valid_event)
 
     mock_save_event.assert_called_once_with(valid_event)
+
+    metrics = worker.metrics.snapshot()
+    assert metrics.stored == 1
+    assert metrics.failed == 0
+    assert metrics.retried == 0
 
 
 @patch("mobility.ingestion.kafka.worker.initialize_analytics_schema")
@@ -164,11 +173,19 @@ def test_handle_event_propagates_clickhouse_failure(
     mock_save_event: MagicMock,
     valid_event: VehicleEvent,
 ) -> None:
-    """Propagate ClickHouse failures so the Kafka offset remains uncommitted."""
+    """Propagate ClickHouse failures and increment the failed metric."""
     mock_save_event.side_effect = RuntimeError("ClickHouse unavailable")
+    worker = KafkaClickHouseWorker()
 
     with pytest.raises(RuntimeError, match="ClickHouse unavailable"):
-        KafkaClickHouseWorker._handle_event(valid_event)
+        worker._handle_event(valid_event)
+
+    mock_save_event.assert_called_once_with(valid_event)
+
+    metrics = worker.metrics.snapshot()
+    assert metrics.failed == 1
+    assert metrics.stored == 0
+    assert metrics.retried == 0
 
 
 @patch("mobility.ingestion.kafka.worker.time.sleep")
@@ -178,16 +195,22 @@ def test_handle_event_retries_transient_failure(
     mock_sleep: MagicMock,
     valid_event: VehicleEvent,
 ) -> None:
-    """Retry a transient ClickHouse failure and succeed on the second attempt."""
+    """Retry a transient failure and record retry and storage metrics."""
     mock_save_event.side_effect = [
         OperationalError("Temporary ClickHouse failure"),
         None,
     ]
+    worker = KafkaClickHouseWorker()
 
-    KafkaClickHouseWorker._handle_event(valid_event)
+    worker._handle_event(valid_event)
 
     assert mock_save_event.call_count == 2
     mock_sleep.assert_called_once_with(1)
+
+    metrics = worker.metrics.snapshot()
+    assert metrics.retried == 1
+    assert metrics.stored == 1
+    assert metrics.failed == 0
 
 
 @patch("mobility.ingestion.kafka.worker.time.sleep")
@@ -197,14 +220,20 @@ def test_handle_event_raises_after_retry_exhaustion(
     mock_sleep: MagicMock,
     valid_event: VehicleEvent,
 ) -> None:
-    """Raise after all three transient-failure attempts are exhausted."""
+    """Record failure when all three transient attempts are exhausted."""
     mock_save_event.side_effect = OperationalError("ClickHouse unavailable")
+    worker = KafkaClickHouseWorker()
 
     with pytest.raises(OperationalError, match="ClickHouse unavailable"):
-        KafkaClickHouseWorker._handle_event(valid_event)
+        worker._handle_event(valid_event)
 
     assert mock_save_event.call_count == 3
     assert [call.args[0] for call in mock_sleep.call_args_list] == [1, 2]
+
+    metrics = worker.metrics.snapshot()
+    assert metrics.retried == 2
+    assert metrics.failed == 1
+    assert metrics.stored == 0
 
 
 @patch("mobility.ingestion.kafka.worker.time.sleep")
@@ -214,14 +243,20 @@ def test_handle_event_does_not_retry_permanent_failure(
     mock_sleep: MagicMock,
     valid_event: VehicleEvent,
 ) -> None:
-    """Do not retry permanent ClickHouse programming errors."""
+    """Record permanent failures without retrying."""
     mock_save_event.side_effect = ProgrammingError("Invalid query")
+    worker = KafkaClickHouseWorker()
 
     with pytest.raises(ProgrammingError, match="Invalid query"):
-        KafkaClickHouseWorker._handle_event(valid_event)
+        worker._handle_event(valid_event)
 
     mock_save_event.assert_called_once_with(valid_event)
     mock_sleep.assert_not_called()
+
+    metrics = worker.metrics.snapshot()
+    assert metrics.failed == 1
+    assert metrics.retried == 0
+    assert metrics.stored == 0
 
 
 @patch("mobility.ingestion.kafka.worker.initialize_analytics_schema")
@@ -378,3 +413,55 @@ def test_json_log_formatter_includes_exception() -> None:
     assert log_data["level"] == "ERROR"
     assert log_data["message"] == "Processing failed"
     assert "ValueError: Test failure" in log_data["exception"]
+
+
+@patch("mobility.ingestion.kafka.worker.initialize_analytics_schema")
+@patch("mobility.ingestion.kafka.worker.VehicleEventConsumer")
+@patch("mobility.ingestion.kafka.worker.DeadLetterPublisher")
+def test_run_manages_readiness_during_worker_lifecycle(
+    mock_dlq: MagicMock,
+    mock_consumer: MagicMock,
+    mock_initialize_schema: MagicMock,
+) -> None:
+    """Enable readiness after initialization and disable it on shutdown."""
+    worker = KafkaClickHouseWorker()
+    stop_event = Event()
+
+    def process_next(timeout: float) -> None:
+        assert timeout == 1.0
+        assert worker._ready.is_set()
+        assert not worker._stopping.is_set()
+        stop_event.set()
+
+    mock_consumer.return_value.process_next.side_effect = process_next
+
+    assert not worker._ready.is_set()
+    assert not worker._stopping.is_set()
+
+    worker.run(stop_event)
+
+    mock_initialize_schema.assert_called_once_with()
+    mock_consumer.return_value.subscribe.assert_called_once()
+    assert not worker._ready.is_set()
+    assert worker._stopping.is_set()
+
+
+@patch("mobility.ingestion.kafka.worker.close_analytics_client")
+@patch("mobility.ingestion.kafka.worker.VehicleEventConsumer")
+@patch("mobility.ingestion.kafka.worker.DeadLetterPublisher")
+def test_close_marks_worker_not_ready_and_stopping(
+    mock_dlq: MagicMock,
+    mock_consumer: MagicMock,
+    mock_close_analytics: MagicMock,
+) -> None:
+    """Mark the worker unavailable before releasing its resources."""
+    worker = KafkaClickHouseWorker()
+    worker._ready.set()
+
+    worker.close()
+
+    assert not worker._ready.is_set()
+    assert worker._stopping.is_set()
+    mock_consumer.return_value.close.assert_called_once()
+    mock_dlq.return_value.close.assert_called_once()
+    mock_close_analytics.assert_called_once()

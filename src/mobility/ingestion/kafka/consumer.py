@@ -14,6 +14,7 @@ from mobility.ingestion.schemas.vehicle_event import VehicleEvent
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[VehicleEvent], None]
+MetricCallback = Callable[[], None]
 
 
 class VehicleEventConsumer:
@@ -26,6 +27,8 @@ class VehicleEventConsumer:
         group_id: str = "mobility-consumer",
         event_handler: EventHandler | None = None,
         dead_letter_publisher: DeadLetterPublisher | None = None,
+        on_event_consumed: MetricCallback | None = None,
+        on_dead_lettered: MetricCallback | None = None,
     ) -> None:
         """Initialize the Kafka consumer."""
         if not bootstrap_servers.strip():
@@ -40,6 +43,8 @@ class VehicleEventConsumer:
         self._topic = topic
         self._event_handler = event_handler
         self._dead_letter_publisher = dead_letter_publisher
+        self._on_event_consumed = on_event_consumed
+        self._on_dead_lettered = on_dead_lettered
 
         self._consumer = Consumer(
             {
@@ -127,6 +132,9 @@ class VehicleEventConsumer:
                 error_message=str(error),
             )
 
+            if self._on_dead_lettered is not None:
+                self._on_dead_lettered()
+
             logger.warning(
                 "Invalid Kafka message published to dead-letter topic",
                 extra={
@@ -144,6 +152,9 @@ class VehicleEventConsumer:
             self._event_handler(event)
 
         self._consumer.commit(message=message, asynchronous=False)
+
+        if self._on_event_consumed is not None:
+            self._on_event_consumed()
 
         return event
 

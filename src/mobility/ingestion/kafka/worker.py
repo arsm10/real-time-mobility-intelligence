@@ -19,6 +19,8 @@ from mobility.analytics.repository import save_event
 from mobility.analytics.schema import initialize_analytics_schema
 from mobility.ingestion.kafka.consumer import VehicleEventConsumer
 from mobility.ingestion.kafka.dead_letter import DeadLetterPublisher
+from mobility.ingestion.kafka.health import WorkerHealthServer
+from mobility.ingestion.kafka.metrics import WorkerMetrics
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,11 @@ class KafkaClickHouseWorker:
         group_id = os.getenv("KAFKA_GROUP_ID", "mobility-clickhouse-worker")
         dlq_topic = os.getenv("KAFKA_DLQ_TOPIC", "mobility.dlq")
 
+        self._ready = Event()
+        self._stopping = Event()
+        self._closed = False
+        self.metrics = WorkerMetrics()
+
         self._dead_letter_publisher = DeadLetterPublisher(
             bootstrap_servers=bootstrap_servers,
             topic=dlq_topic,
@@ -87,21 +94,21 @@ class KafkaClickHouseWorker:
                 group_id=group_id,
                 event_handler=self._handle_event,
                 dead_letter_publisher=self._dead_letter_publisher,
+                on_event_consumed=self.metrics.record_consumed,
+                on_dead_lettered=self.metrics.record_dead_lettered,
             )
         except Exception:
             self._dead_letter_publisher.close()
             raise
 
-        self._closed = False
-
-    @staticmethod
-    def _handle_event(event: VehicleEvent) -> None:
+    def _handle_event(self, event: VehicleEvent) -> None:
         """Persist one validated event to ClickHouse with retries."""
         max_attempts = 3
 
         for attempt in range(1, max_attempts + 1):
             try:
                 save_event(event)
+
             except (
                 OperationalError,
                 InterfaceError,
@@ -109,6 +116,8 @@ class KafkaClickHouseWorker:
                 StreamFailureError,
             ):
                 if attempt == max_attempts:
+                    self.metrics.record_failed()
+
                     logger.exception(
                         "ClickHouse insert failed after all retry attempts",
                         extra={
@@ -119,6 +128,7 @@ class KafkaClickHouseWorker:
                     )
                     raise
 
+                self.metrics.record_retry()
                 delay = 2 ** (attempt - 1)
 
                 logger.warning(
@@ -133,7 +143,14 @@ class KafkaClickHouseWorker:
                 )
 
                 time.sleep(delay)
+
+            except Exception:
+                self.metrics.record_failed()
+                raise
+
             else:
+                self.metrics.record_stored()
+
                 logger.info(
                     "Vehicle event stored in ClickHouse",
                     extra={
@@ -144,26 +161,40 @@ class KafkaClickHouseWorker:
                 return
 
     def run(self, stop_event: Event) -> None:
-        """Consume events until a shutdown signal is received."""
-        logger.info("Initializing ClickHouse analytics schema")
-        initialize_analytics_schema()
+        """Initialize dependencies and consume until shutdown is requested."""
+        self._ready.clear()
+        self._stopping.clear()
 
-        self._consumer.subscribe()
-        logger.info("Kafka consumer subscribed to topic")
+        try:
+            logger.info("Initializing ClickHouse analytics schema")
+            initialize_analytics_schema()
 
-        logger.info("Kafka-to-ClickHouse worker started")
+            self._consumer.subscribe()
+            logger.info("Kafka consumer subscribed to topic")
 
-        while not stop_event.is_set():
-            try:
-                self._consumer.process_next(timeout=1.0)
-            except Exception:
-                logger.exception("Error while processing Kafka message")
-                raise
+            self._ready.set()
 
-        logger.info("Worker shutdown requested")
+            logger.info("Kafka-to-ClickHouse worker is ready")
+            logger.info("Kafka-to-ClickHouse worker started")
+
+            while not stop_event.is_set():
+                try:
+                    self._consumer.process_next(timeout=1.0)
+                except Exception:
+                    logger.exception("Error while processing Kafka message")
+                    raise
+
+            logger.info("Worker shutdown requested")
+
+        finally:
+            self._ready.clear()
+            self._stopping.set()
 
     def close(self) -> None:
         """Close Kafka, flush the DLQ publisher and release ClickHouse."""
+        self._ready.clear()
+        self._stopping.set()
+
         if self._closed:
             return
 
@@ -183,7 +214,7 @@ class KafkaClickHouseWorker:
 
 
 def main() -> None:
-    """Run the ingestion worker with graceful shutdown support."""
+    """Run the ingestion worker with health monitoring and graceful shutdown."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     configured_level = getattr(logging, log_level, logging.INFO)
 
@@ -201,17 +232,33 @@ def main() -> None:
 
     stop_event = Event()
     worker = KafkaClickHouseWorker()
+    health_server: WorkerHealthServer | None = None
 
     def request_shutdown(signum: int, frame: object) -> None:
+        """Request graceful worker shutdown."""
         stop_event.set()
 
-    signal.signal(signal.SIGINT, request_shutdown)
-    signal.signal(signal.SIGTERM, request_shutdown)
-
     try:
+        signal.signal(signal.SIGINT, request_shutdown)
+        signal.signal(signal.SIGTERM, request_shutdown)
+
+        health_server = WorkerHealthServer(
+            metrics=worker.metrics,
+            ready=worker._ready,
+            stopping=worker._stopping,
+            host="0.0.0.0",
+            port=int(os.getenv("HEALTH_PORT", "8001")),
+        )
+
+        health_server.start()
         worker.run(stop_event)
+
     finally:
-        worker.close()
+        try:
+            worker.close()
+        finally:
+            if health_server is not None:
+                health_server.stop()
 
 
 if __name__ == "__main__":

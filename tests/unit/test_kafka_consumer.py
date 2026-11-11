@@ -283,6 +283,29 @@ def test_process_next_processes_and_commits_valid_event(
     )
 
 
+def test_process_next_records_consumed_after_successful_commit(
+    consumer: VehicleEventConsumer,
+    valid_event: VehicleEvent,
+) -> None:
+    """Record consumption only after successful processing and offset commit."""
+    consumer.subscribe()
+
+    message = create_message(valid_event.model_dump_json().encode("utf-8"))
+    consumer._consumer.poll.return_value = message
+
+    on_event_consumed = MagicMock()
+    consumer._on_event_consumed = on_event_consumed
+
+    result = consumer.process_next()
+
+    assert result == valid_event
+    consumer._consumer.commit.assert_called_once_with(
+        message=message,
+        asynchronous=False,
+    )
+    on_event_consumed.assert_called_once_with()
+
+
 def test_process_next_without_handler_commits_valid_event(
     consumer: VehicleEventConsumer,
     valid_event: VehicleEvent,
@@ -341,10 +364,14 @@ def test_process_next_does_not_commit_when_handler_fails(
     handler = MagicMock(side_effect=RuntimeError("Processing failed"))
     consumer._event_handler = handler
 
+    on_event_consumed = MagicMock()
+    consumer._on_event_consumed = on_event_consumed
+
     with pytest.raises(RuntimeError, match="Processing failed"):
         consumer.process_next()
 
     consumer._consumer.commit.assert_not_called()
+    on_event_consumed.assert_not_called()
 
 
 def test_process_next_propagates_commit_failure(
@@ -358,8 +385,13 @@ def test_process_next_propagates_commit_failure(
     consumer._consumer.poll.return_value = message
     consumer._consumer.commit.side_effect = KafkaException(KafkaError(KafkaError._TRANSPORT))
 
+    on_event_consumed = MagicMock()
+    consumer._on_event_consumed = on_event_consumed
+
     with pytest.raises(KafkaException):
         consumer.process_next()
+
+    on_event_consumed.assert_not_called()
 
 
 def test_close_closes_kafka_consumer(
@@ -409,6 +441,32 @@ def test_process_next_sends_invalid_json_to_dead_letter_queue(
     )
 
 
+def test_process_next_records_dead_lettered_after_successful_publish(
+    consumer: VehicleEventConsumer,
+) -> None:
+    """Record DLQ publication after successfully publishing an invalid message."""
+    consumer.subscribe()
+
+    dead_letter_publisher = MagicMock(spec=DeadLetterPublisher)
+    on_dead_lettered = MagicMock()
+
+    consumer._dead_letter_publisher = dead_letter_publisher
+    consumer._on_dead_lettered = on_dead_lettered
+
+    message = create_message(b"invalid json")
+    consumer._consumer.poll.return_value = message
+
+    result = consumer.process_next()
+
+    assert result is None
+    dead_letter_publisher.publish.assert_called_once()
+    on_dead_lettered.assert_called_once_with()
+    consumer._consumer.commit.assert_called_once_with(
+        message=message,
+        asynchronous=False,
+    )
+
+
 def test_process_next_sends_invalid_schema_to_dead_letter_queue(
     consumer: VehicleEventConsumer,
 ) -> None:
@@ -440,6 +498,9 @@ def test_process_next_does_not_commit_when_dead_letter_publish_fails(
     consumer._dead_letter_publisher = dead_letter_publisher
     consumer._subscribed = True
 
+    on_dead_lettered = MagicMock()
+    consumer._on_dead_lettered = on_dead_lettered
+
     message = create_message(b"invalid json")
     consumer._consumer.poll.return_value = message
 
@@ -447,3 +508,4 @@ def test_process_next_does_not_commit_when_dead_letter_publish_fails(
         consumer.process_next()
 
     consumer._consumer.commit.assert_not_called()
+    on_dead_lettered.assert_not_called()

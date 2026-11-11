@@ -116,8 +116,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: mobility-ingestion-worker
+    command: python -m mobility.ingestion.kafka.worker
     restart: unless-stopped
-    command: ["python", "-m", "mobility.ingestion.kafka.worker"]
+
+    ports:
+      - "127.0.0.1:${HEALTH_PORT:-8001}:${HEALTH_PORT:-8001}"
 
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
@@ -125,6 +128,7 @@ services:
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-mobility-clickhouse-worker}
       KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-mobility.dlq}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HEALTH_PORT: ${HEALTH_PORT:-8001}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-mobility}
@@ -136,6 +140,17 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; port = os.getenv('HEALTH_PORT', '8001'); urllib.request.urlopen(f'http://127.0.0.1:{port}/health/ready', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
 
 volumes:
   kafka-data:
