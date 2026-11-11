@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0,<3",
     "python-dotenv>=1.0,<2",
     "GeoAlchemy2>=0.18,<1",
+    "clickhouse-connect>=0.8,<1",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +35,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra -m 'not integration'"
 markers = [
-    "integration: tests requiring external services such as Kafka",
+    "integration: tests requiring external services such as Kafka, PostgreSQL/PostGIS, or ClickHouse",
 ]
 
 [tool.ruff]
