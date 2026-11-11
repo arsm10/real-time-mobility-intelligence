@@ -28,6 +28,15 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
 
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   postgres:
     image: postgis/postgis:17-3.5
     container_name: mobility-postgres
@@ -99,6 +108,31 @@ services:
       CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-mobility_analytics}
 
     depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mobility-ingestion-worker
+    restart: unless-stopped
+    command: ["python", "-m", "mobility.ingestion.kafka.worker"]
+
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-mobility.test}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-mobility-clickhouse-worker}
+      KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-mobility.dlq}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-mobility}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-mobility_analytics}
+
+    depends_on:
+      kafka:
+        condition: service_healthy
       clickhouse:
         condition: service_healthy
 
