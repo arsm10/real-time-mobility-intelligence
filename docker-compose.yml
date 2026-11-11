@@ -124,6 +124,7 @@ services:
       KAFKA_TOPIC: ${KAFKA_TOPIC:-mobility.test}
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-mobility-clickhouse-worker}
       KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-mobility.dlq}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-mobility}

@@ -1,5 +1,6 @@
 """Kafka consumer for validated vehicle position events."""
 
+import logging
 from collections.abc import Callable
 from json import JSONDecodeError, loads
 from typing import Any
@@ -9,6 +10,8 @@ from pydantic import ValidationError
 
 from mobility.ingestion.kafka.dead_letter import DeadLetterPublisher
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent
+
+logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[VehicleEvent], None]
 
@@ -122,6 +125,16 @@ class VehicleEventConsumer:
                 original_payload=message.value(),
                 error_type=type(error).__name__,
                 error_message=str(error),
+            )
+
+            logger.warning(
+                "Invalid Kafka message published to dead-letter topic",
+                extra={
+                    "source_topic": message.topic(),
+                    "partition": message.partition(),
+                    "offset": message.offset(),
+                    "error_type": type(error).__name__,
+                },
             )
 
             self._consumer.commit(message=message, asynchronous=False)
