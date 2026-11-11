@@ -13,8 +13,11 @@ from mobility.analytics.schema import (
 )
 
 
-def test_clickhouse_config_returns_connection_settings() -> None:
+def test_clickhouse_config_returns_connection_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Return configured ClickHouse connection settings."""
+    monkeypatch.setattr(ClickHouseConfig, "PASSWORD", "test-password")
     config = ClickHouseConfig.get_connection_config()
 
     assert config["host"] == ClickHouseConfig.HOST
@@ -33,8 +36,12 @@ def test_clickhouse_config_requires_password(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @patch("mobility.analytics.database.clickhouse_connect.get_client")
-def test_get_analytics_client_caches_connection(mock_get_client: MagicMock) -> None:
+def test_get_analytics_client_caches_connection(
+    mock_get_client: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Reuse the cached ClickHouse client."""
+    monkeypatch.setattr(ClickHouseConfig, "PASSWORD", "test-password")
     get_analytics_client.cache_clear()
 
     try:
@@ -48,8 +55,12 @@ def test_get_analytics_client_caches_connection(mock_get_client: MagicMock) -> N
 
 
 @patch("mobility.analytics.database.clickhouse_connect.get_client")
-def test_close_analytics_client(mock_get_client: MagicMock) -> None:
+def test_close_analytics_client(
+    mock_get_client: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Close the cached ClickHouse client and clear the cache."""
+    monkeypatch.setattr(ClickHouseConfig, "PASSWORD", "test-password")
     get_analytics_client.cache_clear()
 
     try:
