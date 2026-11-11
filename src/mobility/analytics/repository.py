@@ -56,7 +56,7 @@ def get_average_speed_by_route() -> list[tuple]:
         SELECT
             route_id,
             round(avg(speed_kmh), 2) AS average_speed_kmh
-        FROM vehicle_events
+        FROM vehicle_events FINAL
         GROUP BY route_id
         ORDER BY route_id
         """
@@ -73,7 +73,7 @@ def get_hourly_event_counts() -> list[tuple]:
         SELECT
             toStartOfHour(event_time) AS event_hour,
             count() AS event_count
-        FROM vehicle_events
+        FROM vehicle_events FINAL
         GROUP BY event_hour
         ORDER BY event_hour
         """
@@ -83,12 +83,12 @@ def get_hourly_event_counts() -> list[tuple]:
 
 
 def get_vehicle_event_count(vehicle_id: str) -> int:
-    """Return the number of events recorded for a vehicle."""
+    """Return the number of logically unique events for a vehicle."""
 
     result = get_analytics_client().query(
         """
         SELECT count()
-        FROM vehicle_events
+        FROM vehicle_events FINAL
         WHERE vehicle_id = {vehicle_id:String}
         """,
         parameters={"vehicle_id": vehicle_id},
@@ -102,7 +102,8 @@ def get_vehicle_events(
     limit: int = 100,
     offset: int = 0,
 ) -> list[tuple]:
-    """Return paginated events for a specific vehicle."""
+    """Return paginated, logically unique events for a specific vehicle."""
+
     result = get_analytics_client().query(
         """
         SELECT
@@ -120,7 +121,7 @@ def get_vehicle_events(
             heading_deg,
             status,
             source
-        FROM vehicle_events
+        FROM vehicle_events FINAL
         WHERE vehicle_id = {vehicle_id:String}
         ORDER BY event_time DESC, event_id DESC
         LIMIT {limit:UInt32}

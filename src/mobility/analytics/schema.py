@@ -20,12 +20,35 @@ CREATE TABLE IF NOT EXISTS vehicle_events
     status LowCardinality(String),
     source LowCardinality(String)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (route_id, event_time, vehicle_id, event_id)
 """
 
 
 def initialize_analytics_schema() -> None:
-    """Create the historical vehicle events table."""
-    get_analytics_client().command(CREATE_VEHICLE_EVENTS_TABLE)
+    """Create the idempotent vehicle events table and validate its engine."""
+    client = get_analytics_client()
+    client.command(CREATE_VEHICLE_EVENTS_TABLE)
+
+    result = client.query(
+        """
+        SELECT engine
+        FROM system.tables
+        WHERE database = {database:String}
+          AND name = 'vehicle_events'
+        """,
+        parameters={"database": client.database},
+    )
+
+    if not result.result_rows:
+        raise RuntimeError("ClickHouse vehicle_events table was not found after initialization.")
+
+    engine = result.result_rows[0][0]
+
+    if engine != "ReplacingMergeTree":
+        raise RuntimeError(
+            "ClickHouse vehicle_events table must use ReplacingMergeTree; "
+            f"found {engine}. Run the required database migration before "
+            "starting the ingestion worker."
+        )

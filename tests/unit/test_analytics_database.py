@@ -83,8 +83,47 @@ def test_close_analytics_client_without_connection() -> None:
 
 
 @patch("mobility.analytics.schema.get_analytics_client")
-def test_initialize_analytics_schema(mock_get_client: MagicMock) -> None:
-    """Execute the ClickHouse table creation statement."""
+def test_initialize_analytics_schema_with_replacing_merge_tree(
+    mock_get_client: MagicMock,
+) -> None:
+    """Create the table and accept the expected engine."""
+    client = mock_get_client.return_value
+    client.database = "mobility_analytics"
+    client.query.return_value.result_rows = [("ReplacingMergeTree",)]
+
     initialize_analytics_schema()
 
-    mock_get_client.return_value.command.assert_called_once_with(CREATE_VEHICLE_EVENTS_TABLE)
+    client.command.assert_called_once_with(CREATE_VEHICLE_EVENTS_TABLE)
+    client.query.assert_called_once()
+
+    query_call = client.query.call_args
+    assert "FROM system.tables" in query_call.args[0]
+    assert query_call.kwargs["parameters"] == {"database": "mobility_analytics"}
+
+
+@patch("mobility.analytics.schema.get_analytics_client")
+def test_initialize_analytics_schema_rejects_wrong_engine(
+    mock_get_client: MagicMock,
+) -> None:
+    """Reject an existing table that uses a different engine."""
+    client = mock_get_client.return_value
+    client.database = "mobility_analytics"
+    client.query.return_value.result_rows = [("MergeTree",)]
+
+    with pytest.raises(RuntimeError, match="must use ReplacingMergeTree"):
+        initialize_analytics_schema()
+
+    client.command.assert_called_once_with(CREATE_VEHICLE_EVENTS_TABLE)
+
+
+@patch("mobility.analytics.schema.get_analytics_client")
+def test_initialize_analytics_schema_rejects_missing_table(
+    mock_get_client: MagicMock,
+) -> None:
+    """Reject initialization when the table is not found."""
+    client = mock_get_client.return_value
+    client.database = "mobility_analytics"
+    client.query.return_value.result_rows = []
+
+    with pytest.raises(RuntimeError, match="was not found"):
+        initialize_analytics_schema()
