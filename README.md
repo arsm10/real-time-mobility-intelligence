@@ -26,7 +26,19 @@ A Python-based real-time public transport data platform.
 
 ## Project Status
 
-Currently in initial foundation development.
+Completed milestones:
+
+- M0: Project foundation and tooling.
+- M1: Vehicle event contract and simulator.
+- M2: Kafka producer.
+- M3: Kafka consumer.
+- M4: Event deduplication, out-of-order detection and dead-letter handling.
+- M5: PostgreSQL + PostGIS operational storage.
+- M6: ClickHouse historical analytics.
+- M7: FastAPI analytics API and Docker deployment.
+
+The API currently exposes historical analytics from ClickHouse.
+Kafka-to-ClickHouse automated ingestion is not yet implemented.
 
 ## Local Development
 
@@ -71,6 +83,36 @@ View logs:
 
     ruff check .
     ruff format --check .
+
+## Analytics API
+
+The FastAPI service exposes the following endpoints:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | API health check |
+| GET | `/ready` | ClickHouse readiness check |
+| GET | `/api/v1/analytics/routes/average-speed` | Average speed by route |
+| GET | `/api/v1/analytics/events/hourly` | Hourly vehicle event counts |
+| GET | `/api/v1/analytics/vehicles/{vehicle_id}/events` | Paginated vehicle events |
+
+### Start the API
+
+Configure the required environment variables in your `.env` file, including `CLICKHOUSE_PASSWORD`.
+
+Build and start the API with its ClickHouse dependency:
+
+    docker compose up -d --build api
+
+### API Documentation
+
+Open Swagger UI:
+
+    http://localhost:8000/docs
+
+OpenAPI specification:
+
+    http://localhost:8000/openapi.json
 
 ## License
 

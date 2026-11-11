@@ -95,3 +95,42 @@ def get_vehicle_event_count(vehicle_id: str) -> int:
     )
 
     return result.result_rows[0][0]
+
+
+def get_vehicle_events(
+    vehicle_id: str,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[tuple]:
+    """Return paginated events for a specific vehicle."""
+    result = get_analytics_client().query(
+        """
+        SELECT
+            event_id,
+            schema_version,
+            event_type,
+            vehicle_id,
+            route_id,
+            trip_id,
+            event_time,
+            produced_at,
+            latitude,
+            longitude,
+            speed_kmh,
+            heading_deg,
+            status,
+            source
+        FROM vehicle_events
+        WHERE vehicle_id = {vehicle_id:String}
+        ORDER BY event_time DESC, event_id DESC
+        LIMIT {limit:UInt32}
+        OFFSET {offset:UInt32}
+        """,
+        parameters={
+            "vehicle_id": vehicle_id,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
+
+    return result.result_rows

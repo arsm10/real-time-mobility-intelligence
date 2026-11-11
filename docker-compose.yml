@@ -81,6 +81,27 @@ services:
       retries: 5
       start_period: 15s
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mobility-api
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-mobility}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-mobility_analytics}
+
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
 volumes:
   kafka-data:
   postgres-data:

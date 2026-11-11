@@ -6,6 +6,7 @@ from mobility.analytics.repository import (
     get_average_speed_by_route,
     get_hourly_event_counts,
     get_vehicle_event_count,
+    get_vehicle_events,
     save_event,
 )
 from mobility.ingestion.schemas.vehicle_event import VehicleEvent, VehicleStatus
@@ -83,3 +84,24 @@ def test_get_vehicle_event_count(
 
     assert result == 12
     mock_get_client.return_value.query.assert_called_once()
+
+
+@patch("mobility.analytics.repository.get_analytics_client")
+def test_get_vehicle_events(
+    mock_get_client: MagicMock,
+) -> None:
+    """Return paginated events for a vehicle."""
+    expected = [("event-1", "1.0", "vehicle.position.updated")]
+    mock_get_client.return_value.query.return_value.result_rows = expected
+
+    result = get_vehicle_events("BUS_TEST_001", limit=50, offset=10)
+
+    assert result == expected
+
+    call = mock_get_client.return_value.query.call_args
+    assert call.kwargs["parameters"] == {
+        "vehicle_id": "BUS_TEST_001",
+        "limit": 50,
+        "offset": 10,
+    }
+    assert "ORDER BY event_time DESC" in call.args[0]
