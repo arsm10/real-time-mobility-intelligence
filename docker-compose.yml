@@ -53,6 +53,36 @@ services:
       retries: 5
       start_period: 10s
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: mobility-clickhouse
+    restart: unless-stopped
+
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-mobility_analytics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-mobility}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clickhouse-client --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
 volumes:
   kafka-data:
   postgres-data:
+  clickhouse-data:
+  clickhouse-logs:
