@@ -60,6 +60,7 @@ def test_get_average_speed_by_route(
     mock_get_client.return_value.query.return_value.result_rows = expected
 
     assert get_average_speed_by_route() == expected
+    assert "FROM vehicle_events FINAL" in (mock_get_client.return_value.query.call_args.args[0])
 
 
 @patch("mobility.analytics.repository.get_analytics_client")
@@ -71,6 +72,7 @@ def test_get_hourly_event_counts(
     mock_get_client.return_value.query.return_value.result_rows = expected
 
     assert get_hourly_event_counts() == expected
+    assert "FROM vehicle_events FINAL" in (mock_get_client.return_value.query.call_args.args[0])
 
 
 @patch("mobility.analytics.repository.get_analytics_client")
@@ -84,6 +86,7 @@ def test_get_vehicle_event_count(
 
     assert result == 12
     mock_get_client.return_value.query.assert_called_once()
+    assert "FROM vehicle_events FINAL" in (mock_get_client.return_value.query.call_args.args[0])
 
 
 @patch("mobility.analytics.repository.get_analytics_client")
@@ -105,3 +108,4 @@ def test_get_vehicle_events(
         "offset": 10,
     }
     assert "ORDER BY event_time DESC" in call.args[0]
+    assert "FROM vehicle_events FINAL" in (mock_get_client.return_value.query.call_args.args[0])

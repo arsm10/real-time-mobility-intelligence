@@ -80,6 +80,8 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
+      - ./docker/clickhouse/config.d/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml:ro
+      - ./.local-backups/clickhouse:/backups
 
     healthcheck:
       test:

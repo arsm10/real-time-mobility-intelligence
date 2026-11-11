@@ -38,3 +38,6 @@ Thumbs.db
 
 # Local generated data
 data/
+
+# Local database backups
+.local-backups/
